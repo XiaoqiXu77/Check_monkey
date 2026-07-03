@@ -336,3 +336,173 @@ for monkey = 1:n_monkeys
     
     behav_all{monkey} = behav;
 end
+
+%% --- Data Organization from behav_all and neuro_all ---
+
+% Preallocate an empty structure array for efficiency.
+% This structure will contain data for each neuron.
+data_by_neuron = struct('neuronID', [], 'monkey', [], 'area', [], ...
+    'firingRates_ch', [], 'choice', [], 'firingRates_fb', [],'feedback', [], ...
+    'speed_ch', [], 'speed_fb', [], 'gauge_size', [], 'pre_gs', [], ...
+    'gs_fb', [], 'wl', [], 'wl_fb', [], 'id_trial', [], 'time', [], ...
+    'rt', [], 'rt_ch', [], 'pe', [], 'speed_est', [], 'gs_est', [], ...
+    'speed_estfb', [], 'gs_estfb', [], 'pe_label', []);
+
+ctr = 1;
+for monkey = 1:n_monkeys
+    behav = behav_all{monkey};  % behavioral matrix for current monkey
+    neuro = neuro_all{monkey};  % neural data structure for current monkey
+    for area = 1:n_areas
+        % Get indices of units for the given area.
+        idx_unit_area = find(neuro.area == area);
+        n_units = length(idx_unit_area);
+        
+        for u = 1:n_units
+            id_unit = idx_unit_area(u);
+            % Find trials for this unit (using column 11 for matching neuron ID)
+            idx_trials = find(behav(:,11) == id_unit + min(behav(:,11)) - 1);
+            idx_work_trials = find(behav(behav(:, 5) ~= 0,11) == id_unit + min(behav(:,11)) - 1);
+            idx_trials_work = find(behav(:,11) == id_unit + min(behav(:,11)) - 1 & behav(:, 5) ~= 0);
+            
+            % Extract task variables from behav matrix:
+            choice = behav(idx_trials,5) ~= 0;      % 1 for work, 0 for check
+            speed_ch = behav(idx_trials,9);       
+            gauge_size = behav(idx_trials,6);         
+            pre_gs = behav(idx_trials,16);           
+            wl = behav(idx_trials,17);
+            speed_est = behav(idx_trials,21);
+            pe = behav(idx_trials,22);
+            pe_label = behav(idx_trials,24);
+            gs_est = behav(idx_trials,23);
+            rt_ch = behav(idx_trials,8);
+            nb_re = behav(idx_trials,7);
+            
+            fb = behav(idx_trials_work,5);
+            speed_fb = behav(idx_trials_work,9);
+            speed_estfb = behav(idx_trials_work,21);
+            gs_fb = behav(idx_trials_work,6);
+            gs_estfb = behav(idx_trials_work,23);
+            wl_fb = behav(idx_trials_work,17);   
+            rt = behav(idx_trials_work,8);
+            
+            % Remove trials with 0 speed immediately:
+            validIdx = (speed_ch ~= 0);
+            validIdx_work = behav(idx_trials_work,9)~=0;
+            if ~any(validIdx)
+                continue;  % skip this unit if no valid trial
+            end
+            choice = choice(validIdx);
+            speed_ch = speed_ch(validIdx);
+            gauge_size = gauge_size(validIdx);
+            pre_gs = pre_gs(validIdx);
+            wl = wl(validIdx);
+            speed_est = speed_est(validIdx);
+            gs_est = gs_est(validIdx);
+            pe = pe(validIdx);
+            pe_label = pe_label(validIdx);
+            rt_ch = rt_ch(validIdx);
+            nb_re = nb_re(validIdx);
+            
+            fb = fb(validIdx_work);
+            speed_fb = speed_fb(validIdx_work);
+            gs_fb = gs_fb(validIdx_work);
+            wl_fb = wl_fb(validIdx_work);
+            rt = rt(validIdx_work);
+            speed_estfb = speed_estfb(validIdx_work);
+            gs_estfb = gs_estfb(validIdx_work);
+            
+            % Get firing rates for these trials
+            y_ch = neuro.firing_rates_choice(idx_trials, :);
+            y_ch = y_ch(validIdx, :);
+            y_fb = neuro.firing_rates_fb(idx_work_trials, :);
+            y_fb = y_fb(validIdx_work, :);
+%             y = neuro.firing_rates_trial(idx_trials, :);
+            
+            % Skip this unit if not enough trials
+            if size(y_fb, 1) < 5
+                continue;
+            end
+            
+            % Store the data in the structure:
+            data_by_neuron(ctr).neuronID = id_unit;
+            data_by_neuron(ctr).monkey = monkey;
+            data_by_neuron(ctr).area = area;
+            data_by_neuron(ctr).firingRates_ch = y_ch;  % [nTrials x nTimeBins]
+            data_by_neuron(ctr).firingRates_fb = y_fb;  % [nTrials x nTimeBins]
+%             data_by_neuron(ctr).spikeCounts_tr = y;  % [nTrials x nTimeBins]
+            data_by_neuron(ctr).choice = choice;    % [nTrials x 1]
+            data_by_neuron(ctr).feedback = fb;    % [nTrials x 1]
+            data_by_neuron(ctr).speed_ch = speed_ch;      % [nTrials x 1]
+            data_by_neuron(ctr).speed_fb = speed_fb;      % [nTrials x 1]
+            data_by_neuron(ctr).speed_est = speed_est;      % [nTrials x 1]
+            data_by_neuron(ctr).speed_estfb = speed_estfb;
+            data_by_neuron(ctr).gs_est = gs_est;
+            data_by_neuron(ctr).gs_estfb = gs_estfb;
+            data_by_neuron(ctr).pe = pe;
+            data_by_neuron(ctr).pe_label = pe_label;
+            data_by_neuron(ctr).rt_ch = rt_ch;
+            data_by_neuron(ctr).gauge_size = gauge_size;
+            data_by_neuron(ctr).gs_fb = gs_fb;
+            data_by_neuron(ctr).pre_gs = pre_gs;
+            data_by_neuron(ctr).wl = wl;
+            data_by_neuron(ctr).wl_fb = wl_fb;
+%             data_by_neuron(ctr).id_trial = [1:size(choice,1)]';
+            data_by_neuron(ctr).time = tmin;
+            data_by_neuron(ctr).rt = rt;
+            data_by_neuron(ctr).nb_re = nb_re;
+
+            data_by_neuron(ctr).checks = behav(idx_trials(validIdx), 18);
+            data_by_neuron(ctr).block  = behav(idx_trials(validIdx), 2);
+            
+            % time constant 
+            % Get spike times for these trials
+            y = neuro.spikeTimes(idx_trials);
+            data_by_neuron(ctr).spikeTimes  = y;
+            
+            % compute autocorrelogram TAU for this neuron
+            [tau, lags, rvals] = compute_tau_fontanier(y);
+            data_by_neuron(ctr).tau   = tau;
+            data_by_neuron(ctr).lags  = lags;
+            data_by_neuron(ctr).rvals = rvals;   % smoothed autocorrelogram
+            
+            ctr = ctr + 1;
+        end
+    end
+end
+
+%%
+%% prepare data for RNN
+behav = behav_all{1};
+
+% Ensure all variables exist and are column vectors
+fb = behav(:, 5);
+gs = behav(:, 6);
+prev_gs = behav(:, 16);
+session = behav(:, 11);
+
+% % Replace modular 0 with 7
+% prev_gs(prev_gs == 0) = 7;
+
+% --- Filter invalid gauge values (gs or prev_gs outside 1–7) ---
+valid_idx = (gs >= 1 & gs <= 7) & (prev_gs >= 0 & prev_gs <= 6);
+
+% Keep only valid rows
+fb       = fb(valid_idx);
+gs       = gs(valid_idx);
+prev_gs  = prev_gs(valid_idx);
+session  = session(valid_idx);
+
+fprintf('Removed %d invalid trials (%.2f%% of total)\n', ...
+        sum(~valid_idx), 100 * sum(~valid_idx) / numel(valid_idx));
+
+% --- Now save the cleaned data ---
+save('gauge_data.mat', 'fb', 'gs', 'prev_gs', 'session');
+
+
+% Sanity check
+N = numel(fb);
+assert(numel(gs) == N && numel(prev_gs) == N && numel(session) == N, ...
+    'All vectors must have the same length.');
+
+% Save
+save('gauge_data.mat', 'fb', 'gs', 'prev_gs', 'session');
