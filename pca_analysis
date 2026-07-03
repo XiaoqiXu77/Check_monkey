@@ -1,0 +1,89 @@
+%% ==============================================================
+%  PCA on CONDITION-AVERAGED activity, project single trials,
+%  visualize trajectories (color = speed, line = feedback)
+% ==============================================================
+
+allSpeeds   = [1 2 3 4];
+allFeedback = [1 2];
+allAreas    = [1 2];
+nTrialsPerCond = 20;   % pseudo-trials sampled w/ replacement
+nBoots = 100;           % boots for CI on Δ cosine
+nPC = 3;               % PCs to visualize
+smoothWin = 5;         % optional smoothing window on trajectories (time samples)
+lambda_reg = 1e-3;
+
+for a = allAreas
+    neurons_a = data_by_neuron([data_by_neuron.area]==a);
+    if isempty(neurons_a), continue; end
+    nNeurons_a = numel(neurons_a);
+    nTime = size(neurons_a(1).firingRates_fb,2);
+    fprintf('Area %d: %d neurons, %d time bins\n', a, nNeurons_a, nTime);
+
+    % Build one pseudo-population instance (you can average across multiple)
+    [X_time, allSpeed, allFb] = build_pseudo(neurons_a, allSpeeds, allFeedback, nTrialsPerCond);
+
+    % CONDITION-AVERAGED (average across pseudo-trials for each (speed,fb))
+    conds = [];
+    for s = allSpeeds, for fb = allFeedback, conds = [conds; s fb]; end, end
+    nConds = size(conds,1);
+    cond_mean = zeros(nConds, nNeurons_a, nTime);
+    for c = 1:nConds
+        rows = (c-1)*nTrialsPerCond + (1:nTrialsPerCond);
+        cond_mean(c,:,:) = squeeze(mean(X_time(rows,:,:),1)); % [neurons x time]
+    end
+
+    % Option A: PCA on time-averaged condition means (stable)
+    cond_mean_timeavg = squeeze(mean(cond_mean,3)); % [conds x neurons]
+    cond_mean_timeavg = zscore(cond_mean_timeavg);  % per neuron zscore across conditions
+    [coeff, ~, ~, ~, expl] = pca(cond_mean_timeavg);
+    fprintf('Area %d: PCA cond-avg first 3 PCs explain %.1f%%\n', a, sum(expl(1:3)));
+
+    % Option B (alternative): PCA on concatenated condition-by-time data:
+    % Uncomment if you prefer time-resolved PCA basis:
+    % cond_cat = reshape(permute(cond_mean,[1 3 2]), [], nNeurons_a); % [conds*time x neurons]
+    % cond_cat = zscore(cond_cat);
+    % [coeff,~,~,~,expl] = pca(cond_cat);
+
+    % Project single-trial (pseudo) data into cond-avg PCA space, time-resolved
+    proj_time = zeros(size(X_time,1), nPC, nTime);
+    for t = 1:nTime
+        Xt = zscore(X_time(:,:,t));
+        proj_time(:,:,t) = Xt * coeff(:,1:nPC);
+    end
+
+    % OPTIONAL: smooth trajectories over time for plotting
+    if smoothWin>1
+        for tr = 1:size(proj_time,1)
+            for pc = 1:nPC
+                proj_time(tr,pc,:) = smoothdata(squeeze(proj_time(tr,pc,:)),'movmean',smoothWin);
+            end
+        end
+    end
+
+    % Plot mean trajectories per (speed,fb)
+    figure('Name',sprintf('Area %d cond-avg PCA projection',a),'Color','w');
+    hold on;
+    cmap = [0 0.4470 0.7410;  % blue
+            0.8500 0.3250 0.0980; % orange
+            0.9290 0.6940 0.1250; % yellow
+            0.4940 0.1840 0.5560];% purple
+    fbStyle = {'-','--'}; % 1=pos solid, 2=neg dashed
+    for s = allSpeeds
+        for fb = allFeedback
+            idx = (allSpeed==s & allFb==fb);
+            meanTraj = squeeze(mean(proj_time(idx,:,:),1)); % [PC x time]
+            plot3(meanTraj(1,:), meanTraj(2,:), meanTraj(3,:), ...
+                'Color', cmap(s,:), 'LineStyle', fbStyle{fb}, 'LineWidth', 1.5);
+        end
+    end
+    xlabel('PC1'); ylabel('PC2'); zlabel('PC3'); grid on; axis equal;
+    title(sprintf('Area %s: proj into cond-avg PC (color=speed, line=fb)', area_names{a}));
+    legendEntries = {};
+    for s = allSpeeds
+        for fb = allFeedback
+            legendEntries{end+1} = sprintf('Rate %d (fb%d)', s, fb);
+        end
+    end
+    legend(legendEntries,'Location','northeastoutside');
+    view(35,20);
+end
